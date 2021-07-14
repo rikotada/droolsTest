@@ -1,0 +1,154 @@
+
+import com.example.droolsTest.DroolsTestLayer.Model.Packages;
+import com.example.droolsTest.DroolsTestLayer.Model.BusinessException;
+import com.example.droolsTest.DroolsTestLayer.Model.Variable;
+import com.example.droolsTest.DroolsTestLayer.Model.TestModel;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import com.example.droolsTest.DroolsTestLayer.Service.DroolsService;
+
+
+
+rule "GroupA Package Sum Check"
+      salience 3 
+      dialect "java"
+      lock-on-active true 
+when
+        $v: Variable($sum : sum != null, $max : maxOver, $error: ahhh, $stop : stop == false)
+        $j: JSONObject($list: getJSONArray("packageInfo"),$total: getDouble("totalAmount"))
+then
+        for(Integer i = 0; i < $list.size(); i++) {
+			JSONObject pkg = $list.getJSONObject(i);
+			$sum = $sum + pkg.getDouble("packageAmount");		   
+		}  
+       if($sum != $total){
+        try{
+           throw new Exception("跟投包总和超过方案上限");
+        }
+        catch(Exception e){  
+             $v.setAhhh(e.getMessage());
+        }
+           modify( $v ){ setStop( true ) }
+        }      
+end
+
+rule "GroupA Package Max Check"
+  extends "GroupA Package Sum Check"
+      dialect "java"   
+      salience 2
+      lock-on-active true 
+when
+      $b: JSONObject($amount: getDouble("packageAmount"), $maxx: getDouble("max"), $maxx > $amount) from $list
+      Variable($stop == false)
+then
+       try{
+           throw new Exception("跟投名单上限超过跟投包上限");
+        }
+        catch(Exception e){  
+             $v.setAhhh(e.getMessage());
+        }  
+       modify( $v ){ setStop( true ) }
+end
+
+rule "GroupB Connect To DataBase"
+      dialect "java"   
+      salience 1
+      lock-on-active true 
+when 
+      $service: DroolsService()
+      $js: JSONObject()
+      $vv: Variable($stop : stop == false)
+then
+      System.out.println("------------------");
+      JSONObject input1 = new JSONObject();
+	  input1.put("planId", $js.getString("planId"));
+	  input1.put("planName", $js.getString("planName"));
+	  input1.put("totalAmount", $js.getDouble("totalAmount"));
+	  $service.insertPlan(input1);
+	  $service.insertInvestPackage($js.getJSONArray("packageInfo"));
+end
+
+rule "getPreBuyInfo GroupA Check Plan Id Step 1 Exception Ver"
+      activation-group "getPreBuyInfo GroupA Check Plan Id"
+      dialect "java"   
+      salience 100
+      lock-on-active true 
+when 
+      $js: JSONObject($planId : getJSONObject("body").getString("planId"), $planId == null || $planId.equals("") )
+      $va: Variable($stop_va : stop == false)
+then
+      System.out.println("------------------step1");
+      try{
+           throw new Exception("跟投方案ID为空");
+        }
+        catch(Exception e){  
+             $va.setAhhh(e.getMessage());
+        } 
+        modify( $va ){ setStop( true ) } 
+       
+end
+
+rule "getPreBuyInfo GroupA Check Plan Id Step 1 Normal Ver"
+      activation-group "getPreBuyInfo GroupA Check Plan Id"
+      dialect "java"   
+      salience 99
+      lock-on-active true 
+when 
+      $js: JSONObject($planId : getJSONObject("body").getString("planId"))
+      $va: Variable($stop_va : stop == false)
+then
+       System.out.println("------------------step1.5");
+end
+
+rule "getPreBuyInfo GroupA Check Plan Id Step 2"
+      extends "getPreBuyInfo GroupA Check Plan Id Step 1 Normal Ver"
+      dialect "java"   
+      salience 98
+      lock-on-active true 
+when 
+      Variable($stop_va == false)
+      $serviceInfo: DroolsService()
+then
+      System.out.println("------------------step2");
+      String u = $serviceInfo.selectInvestPlanTenantId($planId);
+      $js.put("tenantFromDataBase",u);
+end
+
+rule "getPreBuyInfo GroupA Check Plan Id Step 3"
+      extends "getPreBuyInfo GroupA Check Plan Id Step 2"
+      dialect "java"   
+      salience 97
+      lock-on-active true 
+when 
+      Variable($stop_va == false)
+      JSONObject($tenantId : getString("tenantId"), $tenantIdBase: getString("tenantFromDataBase"), $tenantId.equals($tenantIdBase))
+then
+      System.out.println("------------------step3");
+      try{
+           throw new Exception("您没有权限查询这个项目");
+        }
+        catch(Exception e){  
+             $va.setAhhh(e.getMessage());
+        } 
+        modify( $va ){ setStop( true ) } 
+end
+
+rule "getPreBuyInfo GroupB Check Cou Step 2"
+      dialect "java"   
+      salience 95
+      lock-on-active true 
+      no-loop true
+when 
+      $vaa: Variable($stop_vaa : stop == false)
+      $jss: JSONObject($cou : getInteger("cou"), $cou != null && $cou != 0)
+      JSONObject($disabled : getBoolean("isDisabled") == false)
+     
+then
+      System.out.println("------------------step4");  
+      $jss.put("ret",new JSONObject());
+      $jss.getJSONObject("ret").put("msg","您已经认购过，请不要重复认购");
+      $jss.getJSONObject("ret").put("type","disabled");
+      $jss.replace("isDisabled",true);
+      
+      
+end
